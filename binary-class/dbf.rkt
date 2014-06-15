@@ -160,7 +160,7 @@
 
 (define-binary-class visual-foxpro-memo% xbase-memo-common%
   ((next-available-block u4)
-   (reserved1 u2)
+   (_ (discard 2))
    (record-size u2)
    (_ (discard 504))))
 
