@@ -1,6 +1,31 @@
 #lang racket/base
-(require racket/class racket/contract binary-class)
+(require racket/class racket/contract binary-class (for-syntax racket/base racket/contract))
 (provide dbopen read-record)
+
+(define-for-syntax (make-codevector codepage)
+  (define conv (bytes-open-converter codepage "utf-8"))
+  (begin0
+    (for/list ([i 256])
+      (define-values (str _ status) (bytes-convert conv (bytes i)))
+      (if (eq? status 'complete)
+          (string-ref (bytes->string/utf-8 str) 0)
+          (integer->char i)))
+    (bytes-close-converter conv)))
+
+(define-syntax (gen-table stx)
+  (syntax-case stx ()
+    [(_ ID)
+     (with-syntax ([(GEN-CODE ...) (make-codevector (symbol->string (syntax-e #'ID)))])
+       #'(define ID (vector GEN-CODE ...)))]))
+
+(gen-table cp437)
+(gen-table cp850)
+(gen-table cp852)
+(gen-table cp865)
+(gen-table cp866)
+(gen-table cp1250)
+(gen-table cp1251)
+(gen-table cp1252)
 
 (define (select-db-driver db-type)
   (case db-type
@@ -13,20 +38,29 @@
 (define xbase-common%
   (class object%
     (super-new)
-    (field [stream #f] [external-format #f])))
+    (field [stream #f] [external-format #f])
+    (define/public (get-external-format)
+      external-format)))
 
 (define-binary-class dbf-header% xbase-common%
   ((db-type l1))
   #:dispatch (select-db-driver db-type))
 
-(define (convert from datum)
-  (define conv #f)
-  (dynamic-wind
-   (λ() (set! conv (bytes-open-converter from "")))
-   (λ() (let-values ([(a b c) (bytes-convert conv datum)]) (bytes->string/locale a)))
-   (λ() (bytes-close-converter conv))))
+(define (convert conv datum)
+  (define length (bytes-length datum))
+  (define res (make-string length))
+  (for ([i (in-range length)])
+    (string-set! res i (vector-ref conv 
+                                   (bytes-ref datum i))))
+  res)
 
-(define (default-translate driver field datum) 
+#;(define (convert conv datum)
+    (build-string (bytes-length datum)
+                  (λ (i) (vector-ref conv 
+                                     (bytes-ref datum i)))))
+
+(define (default-translate driver field datum)
+  ;(convert cp866-conv datum))
   (send driver translate-field-datum field datum))
 
 (define-binary-class dbase3-header% dbf-header%
@@ -43,14 +77,31 @@
    (indexed l1)
    (code-page l1)
    (_ (discard 2)))
+  (inherit-field external-format)
   (define/public (goto-record n)
     (file-position (get-field stream this)
                    (+ header-size (* n record-size))))
   (define/public (translate-field-datum field datum)
-    (case (integer->char (get-field field-type field))
-      ((#\I #\M) datum)
+    (case ;(integer->char 
+           (get-field field-type field)
+      ;((#\I #\M) datum)
+      ((73 77) datum)
       (else
-       (convert (external-format this) datum))))
+       (convert (get-external-format) 
+                datum))))
+  (define/override (get-external-format)     
+    (or external-format
+        (let ([result (case code-page
+                        ((2)    cp850)
+                        ((3)    cp1252)
+                        ((#x64) cp852)
+                        ((#x65) cp865)
+                        ((#x66) cp866)
+                        ((#xC8) cp1250)
+                        ((#xC9) cp1251)
+                        (else cp437))])
+          (set! external-format result)
+          result)))
   (define/public (read-field-datum field [translate default-translate])
     (define stream (get-field stream this))
     (case (integer->char (get-field field-type field))
@@ -146,7 +197,7 @@
     (define/public (goto-record n) 
       (file-position (get-field stream this) (* n 512)))
     (define/public (translate-field-datum field datum)
-      (convert (external-format this) datum))))
+      (convert cp437 datum))))
 
 (define-binary-class dbt-header% xbase-memo-common%
   ((next-available-block u4)))
@@ -168,6 +219,7 @@
   (file-position stream 0)
   (define db (read-value dbf-header% stream))
   (set-field! stream db stream)
+  (goto-bof! db)
   db)
 
 (define (dbopen-memo stream type code-page)
@@ -177,21 +229,8 @@
   (set-field! code-page memo code-page)
   memo)
 
-(define (goto-bof driver)
+(define (goto-bof! driver)
   (file-position (get-field stream driver) (get-field header-size driver)))
-
-(define (external-format driver)
-  (or (get-field external-format driver)
-      (format "cp~a"
-              (case (get-field code-page driver)
-                ((2)    850)
-                ((3)    1252)
-                ((#x64) 852)
-                ((#x65) 865)
-                ((#x66) 866)
-                ((#xC8) 1250)
-                ((#xC9) 1251)
-                (else 437)))))
 
 (define (read-record driver [translate default-translate])
   (define stream (get-field stream driver))
@@ -205,3 +244,6 @@
                     (+ (file-position stream)
                        (sub1 (get-field record-size driver))))
      (read-record driver translate)]))
+
+
+;(run-test)
