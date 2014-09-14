@@ -12,7 +12,10 @@
                [(#x4 #x7B #x8B #x8E) dbase4%]
                [(#x30 #x31 #x32 #xF5 #xFB) visual-foxpro%]
                [else dbase3%])
-  (abstract goto-eof! goto-record! read-record set-code-page!))
+  (define/public (goto-eof!) #f)
+  (define/public (goto-record!) #f)
+  (define/public (read-record) #f)
+  (define/public (set-code-page!) #f))
 
 (define (get-code-page desc)
   (case desc
