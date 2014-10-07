@@ -12,10 +12,12 @@
                [(#x4 #x7B #x8B #x8E) dbase4%]
                [(#x30 #x31 #x32 #xF5 #xFB) visual-foxpro%]
                [else dbase3%])
-  (define/public (goto-eof!) #f)
-  (define/public (goto-record!) #f)
-  (define/public (read-record) #f)
-  (define/public (set-code-page!) #f))
+  (define/public (goto-eof!) (raise 'not-implemented))
+  (define/public (goto-record!) (raise 'not-implemented))
+  (define/public (read-record) (raise 'not-implemented))
+  (define/public (set-code-page!) (raise 'not-implemented))
+  (define/public (new-field name type length precision) (raise 'not-implemented))
+  (define/public (set-fields! Fields) (raise 'not-implemented)))
 
 (define (get-code-page desc)
   (case desc
@@ -101,8 +103,9 @@
          (subbytes name 0 nul-char-position)
          name))
    (λ (out id)
-     (define id-length (bytes-length id))
-     (write-value (bytestring id-length) out id)
+     (define id-length (if id (bytes-length id) 0))
+     (when id
+       (write-value (bytestring id-length) out id))
      (for [(i (in-range (- length id-length)))]
        (write-byte 0 out)))))
 
@@ -208,17 +211,34 @@
 (define (xbase-fields length) (fields xbase-field% length))
 (define (visual-foxpro-fields length) (fields visual-foxpro-field% length))
 
+(define-syntax-rule (define/methods field% fields header-size base-header)
+  (begin
+    (define/override (new-field name type [size 0] [precision 0])
+      (define new-field (new field%))
+      (set-field! name new-field name)
+      (set-field! type new-field type)
+      (set-field! size new-field size)
+      (set-field! precision new-field precision)
+      new-field)
+    (define/override (set-fields! Fields)
+      (set! fields Fields)
+      (set! header-size (+ base-header (apply + (map (λ (x) (get-field size x)) fields)))))))
+
 (define-binary-class dbase3% dbase3-header%
-  ((fields (xbase-fields header-size))))
+  ((fields (xbase-fields header-size)))
+  (define/methods xbase-field% fields header-size 33))
 
 (define-binary-class dbase4% dbase3-header%
-  ((fields (xbase-fields header-size))))
+  ((fields (xbase-fields header-size)))
+  (define/methods xbase-field% fields header-size 33))
 
 (define-binary-class foxbase% dbase3-header%
-  ((fields (xbase-fields header-size))))
+  ((fields (xbase-fields header-size)))
+  (define/methods xbase-field% fields header-size 33))
 
 (define-binary-class visual-foxpro% dbase3-header%
-  ((fields (visual-foxpro-fields header-size))))
+  ((fields (visual-foxpro-fields header-size)))
+  (define/methods visual-foxpro-field% fields header-size 296))
 
 (gen-tables cp437 cp850 cp852 cp865 cp866 cp1250 cp1251 cp1252)
 
